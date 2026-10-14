@@ -6,6 +6,7 @@ import {
   atualizar,
   atualizarParcial,
   remover,
+  avaliar,
 } from '../controllers/atracoes.controller.js';
 
 const router = express.Router();
@@ -16,5 +17,6 @@ router.post('/', criar);
 router.put('/:id', atualizar);
 router.patch('/:id', atualizarParcial);
 router.delete('/:id', remover);
+router.post('/:id/avaliacoes', avaliar);
 
 export default router;

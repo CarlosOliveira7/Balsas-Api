@@ -1,7 +1,10 @@
-import atracoes from '../data/atracoes.json' with { type: 'json' };
+import { prisma } from '../prisma.js';
 
-export function listarCategorias(req, res) {
-  // Extrai todas as categorias e usa Set para garantir valores únicos
-  const categoriasUnicas = [...new Set(atracoes.map((item) => item.categoria))];
-  res.json(categoriasUnicas);
+export async function listarCategorias(req, res) {
+  const categorias = await prisma.categoria.findMany({
+    include: { _count: { select: { atracoes: true } } },
+    orderBy: { nome: 'asc' },
+  });
+
+  res.json(categorias.map(({ id, nome, _count }) => ({ id, nome, atracoes: _count.atracoes })));
 }

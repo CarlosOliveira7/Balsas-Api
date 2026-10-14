@@ -1,154 +1,243 @@
-import atracoes from '../data/atracoes.json' with { type: 'json' };
+import { prisma } from '../prisma.js';
 
-function proximoId() {
-  return atracoes.reduce((maior, atracao) => Math.max(maior, atracao.id), 0) + 1;
-}
+// Toda listagem devolve a atração com a categoria e as tags já resolvidas
+const COM_RELACOES = {
+  categoria: true,
+  tags: { orderBy: { nome: 'asc' } },
+};
 
-export function listar(req, res) {
-  const { categoria, tag, cidade, ate, ordem, pagina, tamanho } = req.query;
-  let resultado = [...atracoes];
+const dadosDaAtracao = ({
+  nome,
+  descricao,
+  categoria,
+  cidade,
+  estado,
+  distanciaCentroKm,
+  tags,
+}) => ({
+  nome,
+  descricao,
+  cidade: cidade ?? 'Balsas',
+  estado: estado ?? 'MA',
+  distanciaCentroKm: distanciaCentroKm ?? null,
+  categoria: {
+    connectOrCreate: { where: { nome: categoria }, create: { nome: categoria } },
+  },
+  tags: {
+    connectOrCreate: (tags ?? []).map((tag) => ({
+      where: { nome: tag },
+      create: { nome: tag },
+    })),
+  },
+});
 
-  // 1. Filtro por Categoria
-  if (categoria) {
-    resultado = resultado.filter(
-      (atracao) => atracao.categoria.toLowerCase() === categoria.toLowerCase()
-    );
-  }
+// distanciaCentroKm é Int no banco: aceita ausente, null ou inteiro
+const distanciaInvalida = (valor) =>
+  valor !== undefined && valor !== null && !Number.isInteger(valor);
 
-  // 2. Filtro por Tag
-  if (tag) {
-    resultado = resultado.filter((atracao) =>
-      atracao.tags.some((t) => t.toLowerCase() === tag.toLowerCase())
-    );
-  }
+// Id não numérico não existe no banco: tratamos como "não encontrado"
+const lerId = (req) => {
+  const id = Number(req.params.id);
+  return Number.isInteger(id) ? id : null;
+};
 
-  // 3. Desafio em aula 2: Filtro por Cidade (localizacao.cidade)
-  if (cidade) {
-    resultado = resultado.filter(
-      (atracao) => atracao.localizacao?.cidade?.toLowerCase() === cidade.toLowerCase()
-    );
-  }
+const naoEncontrada = (res) => res.status(404).json({ erro: 'Atração não encontrada' });
 
-  // 4. Desafio em aula 3: Filtro ate X km (distanciaCentroKm != null)
+export async function listar(req, res) {
+  const { categoria, tag, q, ate, pagina, tamanho } = req.query;
+
+  // Desafio em aula 1: ?ate=60 (distanciaCentroKm nulo fica de fora)
+  let distancia;
   if (ate) {
     const kmMax = Number(ate);
-    resultado = resultado.filter(
-      (atracao) =>
-        atracao.distanciaCentroKm !== null &&
-        atracao.distanciaCentroKm !== undefined &&
-        atracao.distanciaCentroKm <= kmMax
-    );
+    if (Number.isNaN(kmMax)) {
+      return res.status(400).json({ erro: 'O parâmetro ate deve ser um número' });
+    }
+    distancia = { lte: kmMax };
   }
 
-  // 5. Desafio em aula 4: Ordenacao por nome com toSorted e localeCompare
-  if (ordem === 'nome') {
-    resultado = resultado.toSorted((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
-  }
-
-  // 6. Desafio de extensão 4: Paginação (?pagina=1&tamanho=3)
+  // Desafio em aula 4: ?pagina=1&tamanho=3 (skip e take)
+  let paginacao = {};
   if (pagina && tamanho) {
-    const numPagina = Math.max(1, Number(pagina));
-    const numTamanho = Math.max(1, Number(tamanho));
-    const inicio = (numPagina - 1) * numTamanho;
-    const fim = inicio + numTamanho;
-    resultado = resultado.slice(inicio, fim);
+    const numPagina = Math.max(1, Math.trunc(Number(pagina)));
+    const numTamanho = Math.max(1, Math.trunc(Number(tamanho)));
+    if (Number.isNaN(numPagina) || Number.isNaN(numTamanho)) {
+      return res.status(400).json({ erro: 'pagina e tamanho devem ser números' });
+    }
+    paginacao = { skip: (numPagina - 1) * numTamanho, take: numTamanho };
   }
 
-  res.json(resultado);
+  const atracoes = await prisma.atracao.findMany({
+    where: {
+      categoria: categoria ? { nome: { equals: categoria, mode: 'insensitive' } } : undefined,
+      tags: tag ? { some: { nome: { equals: tag, mode: 'insensitive' } } } : undefined,
+      distanciaCentroKm: distancia,
+      OR: q
+        ? [
+            { nome: { contains: q, mode: 'insensitive' } },
+            { descricao: { contains: q, mode: 'insensitive' } },
+          ]
+        : undefined,
+    },
+    include: COM_RELACOES,
+    orderBy: { nome: 'asc' },
+    ...paginacao,
+  });
+
+  res.json(atracoes);
 }
 
-export function buscarPorId(req, res) {
-  const atracao = atracoes.find((item) => item.id === Number(req.params.id));
-  if (!atracao) {
-    return res.status(404).json({ erro: 'Atração não encontrada' });
-  }
-  res.json(atracao);
+export async function buscarPorId(req, res) {
+  const id = lerId(req);
+  if (id === null) return naoEncontrada(res);
+
+  const atracao = await prisma.atracao.findUnique({
+    where: { id },
+    include: { ...COM_RELACOES, avaliacoes: { orderBy: { criadaEm: 'desc' } } },
+  });
+
+  if (!atracao) return naoEncontrada(res);
+
+  const resumo = await prisma.avaliacao.aggregate({
+    where: { atracaoId: atracao.id },
+    _avg: { nota: true },
+    _count: true,
+  });
+
+  res.json({ ...atracao, notaMedia: resumo._avg.nota, totalAvaliacoes: resumo._count });
 }
 
-export function criar(req, res) {
-  const { nome, categoria, descricao, localizacao, distanciaCentroKm, tags } = req.body ?? {};
+export async function criar(req, res) {
+  const { nome, descricao, categoria, distanciaCentroKm } = req.body ?? {};
 
-  if (!nome || !categoria || !descricao) {
+  if (!nome || !descricao || !categoria) {
     return res.status(400).json({
-      erro: 'Os campos nome, categoria e descricao são obrigatórios',
+      erro: 'Os campos nome, descricao e categoria são obrigatórios',
     });
   }
+  if (distanciaInvalida(distanciaCentroKm)) {
+    return res.status(400).json({ erro: 'distanciaCentroKm deve ser um número inteiro' });
+  }
 
-  const nova = {
-    id: proximoId(),
-    nome,
-    categoria,
-    descricao,
-    localizacao: localizacao ?? { cidade: 'Balsas', estado: 'MA' },
-    distanciaCentroKm: distanciaCentroKm ?? null,
-    tags: tags ?? [],
-  };
+  const nova = await prisma.atracao.create({
+    data: dadosDaAtracao(req.body),
+    include: COM_RELACOES,
+  });
 
-  atracoes.push(nova);
   res.status(201).location(`/atracoes/${nova.id}`).json(nova);
 }
 
-export function atualizar(req, res) {
-  const id = Number(req.params.id);
-  const indice = atracoes.findIndex((item) => item.id === id);
+export async function atualizar(req, res) {
+  const id = lerId(req);
+  if (id === null) return naoEncontrada(res);
 
-  if (indice === -1) {
-    return res.status(404).json({ erro: 'Atração não encontrada' });
+  const { nome, descricao, categoria, distanciaCentroKm } = req.body ?? {};
+
+  if (!nome || !descricao || !categoria) {
+    return res.status(400).json({
+      erro: 'Os campos nome, descricao e categoria são obrigatórios',
+    });
+  }
+  if (distanciaInvalida(distanciaCentroKm)) {
+    return res.status(400).json({ erro: 'distanciaCentroKm deve ser um número inteiro' });
   }
 
-  const { nome, categoria, descricao, localizacao, distanciaCentroKm, tags } = req.body ?? {};
+  const dados = dadosDaAtracao(req.body);
 
-  if (!nome || !categoria || !descricao) {
+  try {
+    const atualizada = await prisma.atracao.update({
+      where: { id },
+      // set: [] desliga todas as tags atuais antes de ligar as novas
+      data: { ...dados, tags: { set: [], connectOrCreate: dados.tags.connectOrCreate } },
+      include: COM_RELACOES,
+    });
+    res.json(atualizada);
+  } catch (erro) {
+    if (erro.code === 'P2025') return naoEncontrada(res);
+    throw erro;
+  }
+}
+
+// Desafio de extensão 1: PATCH altera só os campos enviados
+export async function atualizarParcial(req, res) {
+  const id = lerId(req);
+  if (id === null) return naoEncontrada(res);
+
+  const { nome, descricao, categoria, cidade, estado, distanciaCentroKm, tags } = req.body ?? {};
+
+  if (distanciaInvalida(distanciaCentroKm)) {
+    return res.status(400).json({ erro: 'distanciaCentroKm deve ser um número inteiro' });
+  }
+
+  const data = {};
+  if (nome !== undefined) data.nome = nome;
+  if (descricao !== undefined) data.descricao = descricao;
+  if (cidade !== undefined) data.cidade = cidade;
+  if (estado !== undefined) data.estado = estado;
+  if (distanciaCentroKm !== undefined) data.distanciaCentroKm = distanciaCentroKm;
+  if (categoria !== undefined) {
+    data.categoria = {
+      connectOrCreate: { where: { nome: categoria }, create: { nome: categoria } },
+    };
+  }
+  if (tags !== undefined) {
+    // Se tags foi enviado, a lista é substituída
+    data.tags = {
+      set: [],
+      connectOrCreate: tags.map((tag) => ({ where: { nome: tag }, create: { nome: tag } })),
+    };
+  }
+
+  try {
+    const atualizada = await prisma.atracao.update({
+      where: { id },
+      data,
+      include: COM_RELACOES,
+    });
+    res.json(atualizada);
+  } catch (erro) {
+    if (erro.code === 'P2025') return naoEncontrada(res);
+    throw erro;
+  }
+}
+
+export async function remover(req, res) {
+  const id = lerId(req);
+  if (id === null) return naoEncontrada(res);
+
+  try {
+    await prisma.atracao.delete({ where: { id } });
+    res.status(204).end();
+  } catch (erro) {
+    if (erro.code === 'P2025') return naoEncontrada(res);
+    throw erro;
+  }
+}
+
+export async function avaliar(req, res) {
+  const atracaoId = lerId(req);
+  if (atracaoId === null) return naoEncontrada(res);
+
+  const { visitante, nota, comentario } = req.body ?? {};
+
+  if (!visitante || !Number.isInteger(nota) || nota < 1 || nota > 5) {
     return res.status(400).json({
-      erro: 'Os campos nome, categoria e descricao são obrigatórios',
+      erro: 'Informe o visitante e uma nota inteira de 1 a 5',
     });
   }
 
-  atracoes[indice] = {
-    id,
-    nome,
-    categoria,
-    descricao,
-    localizacao: localizacao ?? { cidade: 'Balsas', estado: 'MA' },
-    distanciaCentroKm: distanciaCentroKm ?? null,
-    tags: tags ?? [],
-  };
-
-  res.json(atracoes[indice]);
-}
-
-// Desafio de extensão 2: PATCH /atracoes/:id (Altera apenas os campos enviados)
-export function atualizarParcial(req, res) {
-  const id = Number(req.params.id);
-  const indice = atracoes.findIndex((item) => item.id === id);
-
-  if (indice === -1) {
-    return res.status(404).json({ erro: 'Atração não encontrada' });
+  try {
+    const avaliacao = await prisma.avaliacao.create({
+      data: {
+        visitante,
+        nota,
+        comentario: comentario ?? null,
+        atracao: { connect: { id: atracaoId } },
+      },
+    });
+    res.status(201).location(`/atracoes/${atracaoId}`).json(avaliacao);
+  } catch (erro) {
+    if (erro.code === 'P2025') return naoEncontrada(res);
+    throw erro;
   }
-
-  const atual = atracoes[indice];
-  const dados = req.body ?? {};
-
-  const atualizada = {
-    ...atual,
-    ...dados,
-    id, // Impede a sobrescrita do ID
-    localizacao: dados.localizacao
-      ? { ...atual.localizacao, ...dados.localizacao }
-      : atual.localizacao,
-  };
-
-  atracoes[indice] = atualizada;
-  res.json(atracoes[indice]);
-}
-
-export function remover(req, res) {
-  const indice = atracoes.findIndex((item) => item.id === Number(req.params.id));
-
-  if (indice === -1) {
-    return res.status(404).json({ erro: 'Atração não encontrada' });
-  }
-
-  atracoes.splice(indice, 1);
-  res.status(204).end();
 }
