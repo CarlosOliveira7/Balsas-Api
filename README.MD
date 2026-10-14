@@ -1,8 +1,12 @@
 # Balsas Experience API
 
-API REST que disponibiliza informações sobre atrações turísticas de **Balsas-MA**. Permite listar, buscar, cadastrar, atualizar e remover atrações, organizadas por categorias e tags. Desenvolvida como entrega final da disciplina [DISCIPLINA] ([CURSO] – [INSTITUIÇÃO]), sob orientação do(a) professor(a) [PROFESSOR].
+API REST que disponibiliza informações sobre atrações turísticas de **Balsas-MA**. Permite listar, buscar, cadastrar, atualizar e remover atrações, organizadas por categorias e tags, e registrar avaliações de visitantes com nota média calculada pelo banco.
 
-**API publicada:** [COLE AQUI O LINK DA API PUBLICADA]
+Projeto final da disciplina **Programação para Web**, do curso de **Análise e Desenvolvimento de Sistemas (ADS)** do **Centro Universitário Unibalsas**, sob orientação do professor Marcos David Souza Ramos.
+
+**API publicada:** https://balsas-api.onrender.com/
+
+> A API roda no plano gratuito do Render, que "dorme" após 15 minutos sem uso. A primeira requisição pode levar cerca de um minuto.
 
 ## Equipe
 
@@ -15,20 +19,32 @@ API REST que disponibiliza informações sobre atrações turísticas de **Balsa
 
 | Tecnologia | Versão | Para que serve |
 |---|---|---|
-| Node.js | [VERSÃO, ex.: 22.x] | Ambiente de execução JavaScript no servidor |
-| Express | 5.2.x | Framework para criar rotas e a API REST |
-| Prisma ORM | 7.10.x | Modelagem do banco, migrações e consultas |
-| @prisma/adapter-pg | 7.10.x | Adaptador do Prisma para PostgreSQL |
-| PostgreSQL | [VERSÃO] | Banco de dados relacional |
+| Node.js | 22 ou superior | Ambiente de execução JavaScript no servidor |
+| Express | 5.2.x | Rotas e servidor HTTP da API REST |
+| Prisma ORM | 7.10.0 | Modelagem do banco, migrações e consultas |
+| @prisma/adapter-pg | 7.10.0 | Adaptador do Prisma para PostgreSQL |
 | pg | 8.23.x | Driver PostgreSQL para Node.js |
-| cors | 2.8.x | Libera acesso à API por outras origens |
-| dotenv | 18.x | Carrega variáveis de ambiente do arquivo `.env` |
+| PostgreSQL (Neon) | [VERSÃO] | Banco de dados relacional na nuvem |
+| cors | 2.8.x | Permite que outras origens consumam a API |
+| dotenv | 18.x | Carrega variáveis de ambiente do `.env` |
+| Render | – | Hospedagem da API |
+
+## Modelo de dados
+
+Quatro tabelas, definidas em `prisma/schema.prisma`:
+
+- **Categoria** (`id`, `nome` único): uma categoria tem várias atrações.
+- **Atracao** (`id`, `nome`, `descricao`, `cidade`, `estado`, `distanciaCentroKm`, `criadaEm`, `categoriaId`): pertence a uma categoria, tem várias tags e várias avaliações.
+- **Tag** (`id`, `nome` único): relação muitos-para-muitos com atrações (o Prisma cria a tabela de ligação `_AtracaoToTag`).
+- **Avaliacao** (`id`, `visitante`, `nota`, `comentario`, `criadaEm`, `atracaoId`): pertence a uma atração e é apagada junto com ela (`onDelete: Cascade`).
+
+As tags são uma tabela separada porque uma atração tem várias tags e a mesma tag serve a várias atrações; tabela relacional não guarda lista, então a relação muitos-para-muitos vira linhas de ligação.
 
 ## Pré-requisitos
 
-- [Node.js](https://nodejs.org/) 20 ou superior
-- [PostgreSQL](https://www.postgresql.org/) em execução (local ou em nuvem)
+- [Node.js](https://nodejs.org/) 22 ou superior
 - [Git](https://git-scm.com/)
+- Um banco PostgreSQL (local ou gratuito no [Neon](https://neon.com/))
 
 ## Instalação e configuração
 
@@ -38,104 +54,121 @@ cd Balsas-Api
 npm install
 ```
 
-Crie um arquivo `.env` na raiz do projeto (ele **não** é versionado):
+Crie um arquivo `.env` na raiz do projeto (ele não é versionado):
 
 ```env
-DATABASE_URL="postgresql://USUARIO:SENHA@localhost:5432/balsas_experience?schema=public"
+DATABASE_URL="postgresql://USUARIO:SENHA@ep-xxxx.sa-east-1.aws.neon.tech/neondb?sslmode=require"
 ```
 
-Substitua `USUARIO`, `SENHA` e o nome do banco pelos dados do seu PostgreSQL.
+Substitua `USUARIO`, `SENHA` e o host pelos dados do seu banco.
 
-## Migrações, seed e execução
+## Migrações, seed e servidor
 
 ```bash
-# Gerar o client do Prisma
-npx prisma generate
+# Gera o client do Prisma e aplica as migrações existentes
+npm run build
 
-# Criar as tabelas no banco
-npx prisma migrate dev
-
-# Popular o banco com dados iniciais
+# Popula o banco (ATENÇÃO: apaga as tabelas antes de inserir; use só em banco novo)
 npm run seed
 
-# Subir o servidor em modo desenvolvimento (recarrega ao salvar)
+# Servidor em desenvolvimento (recarrega ao salvar)
 npm run dev
 
-# Ou em modo produção
+# Servidor em produção
 npm start
 ```
 
-Por padrão o servidor sobe em `http://localhost:3000` (ajuste conforme a porta definida em `src/app.js`).
+O servidor sobe em `http://localhost:3000`.
 
 ## Endpoints
 
-| Método | Caminho | Descrição | Status esperado |
+| Método | Caminho | Descrição | Status |
 |---|---|---|---|
-| GET | `/atracoes` | Lista todas as atrações | 200 |
-| GET | `/atracoes/:id` | Busca uma atração pelo id | 200 / 404 |
-| POST | `/atracoes` | Cadastra uma nova atração | 201 |
-| PUT | `/atracoes/:id` | Substitui os dados de uma atração | 200 / 404 |
-| PATCH | `/atracoes/:id` | Atualiza parcialmente uma atração | 200 / 404 |
-| DELETE | `/atracoes/:id` | Remove uma atração | 204 / 404 |
-| GET | `/categorias` | Lista as categorias | 200 |
+| GET | `/health` | Verifica se a API está no ar | 200 |
+| GET | `/atracoes` | Lista atrações, com categoria e tags | 200 |
+| GET | `/atracoes/:id` | Uma atração, com avaliações, nota média e total | 200 / 404 |
+| POST | `/atracoes` | Cria uma atração | 201 / 400 |
+| PUT | `/atracoes/:id` | Substitui os dados da atração | 200 / 400 / 404 |
+| PATCH | `/atracoes/:id` | Altera só os campos enviados | 200 / 400 / 404 |
+| DELETE | `/atracoes/:id` | Remove a atração e suas avaliações | 204 / 404 |
+| POST | `/atracoes/:id/avaliacoes` | Avalia uma atração (nota de 1 a 5) | 201 / 400 / 404 |
+| GET | `/categorias` | Categorias com a contagem de atrações | 200 |
 
-> Confirme em `src/app.js` o prefixo usado para montar os routers (`/atracoes` e `/categorias`) e ajuste a tabela se for diferente.
+Parâmetros de `GET /atracoes`: `categoria`, `tag`, `q` (busca no nome e na descrição), `ate` (distância máxima em km), `pagina` e `tamanho`. Exemplo: `/atracoes?categoria=Lazer&pagina=1&tamanho=3`.
 
 ### Exemplos de requisição
 
 **Listar atrações**
 
 ```bash
-curl http://localhost:3000/atracoes
+curl https://balsas-api.onrender.com/atracoes
 ```
 
-**Buscar atração inexistente (404)**
+**Filtrar por tag**
 
 ```bash
-curl -i http://localhost:3000/atracoes/9999
+curl "https://balsas-api.onrender.com/atracoes?tag=cachoeira"
+```
+
+**Atração inexistente (404)**
+
+```bash
+curl -i https://balsas-api.onrender.com/atracoes/9999
+```
+
+```json
+{ "erro": "Atração não encontrada" }
 ```
 
 **Criar atração (201)**
 
 ```bash
-curl -X POST http://localhost:3000/atracoes \
+curl -X POST https://balsas-api.onrender.com/atracoes \
   -H "Content-Type: application/json" \
   -d '{
-    "nome": "Ilha do Coroa",
-    "descricao": "Praia de rio com areia branca, ótima para o fim de semana.",
-    "categoriaId": 1,
-    "tags": ["praia", "familia"]
+    "nome": "Parque de Lazer",
+    "descricao": "Espaço destinado ao lazer e à convivência.",
+    "categoria": "Lazer",
+    "distanciaCentroKm": 3,
+    "tags": ["lazer", "família", "parque"]
   }'
 ```
 
-Resposta `201 Created`:
+Resposta `201 Created` (os ids variam conforme o banco):
 
 ```json
 {
-  "id": 7,
-  "nome": "Ilha do Coroa",
-  "descricao": "Praia de rio com areia branca, ótima para o fim de semana.",
-  "categoriaId": 1,
-  "tags": [{ "id": 1, "nome": "praia" }, { "id": 2, "nome": "familia" }]
+  "id": 9,
+  "nome": "Parque de Lazer",
+  "descricao": "Espaço destinado ao lazer e à convivência.",
+  "cidade": "Balsas",
+  "estado": "MA",
+  "distanciaCentroKm": 3,
+  "criadaEm": "2026-10-13T21:00:00.000Z",
+  "categoriaId": 2,
+  "categoria": { "id": 2, "nome": "Lazer" },
+  "tags": [
+    { "id": 4, "nome": "família" },
+    { "id": 5, "nome": "lazer" },
+    { "id": 16, "nome": "parque" }
+  ]
 }
 ```
 
-**Atualizar parcialmente (200)**
+**Avaliar uma atração (201)**
 
 ```bash
-curl -X PATCH http://localhost:3000/atracoes/7 \
+curl -X POST https://balsas-api.onrender.com/atracoes/1/avaliacoes \
   -H "Content-Type: application/json" \
-  -d '{ "descricao": "Nova descrição" }'
+  -d '{ "visitante": "Ana", "nota": 5, "comentario": "Vale a visita." }'
 ```
 
-**Remover (204)**
+**Remover (204, sem corpo)**
 
 ```bash
-curl -i -X DELETE http://localhost:3000/atracoes/7
+curl -i -X DELETE https://balsas-api.onrender.com/atracoes/9
 ```
-
-> Ajuste os campos dos exemplos para refletir exatamente o seu `schema.prisma`.
 
 ## Link da API publicada
 
-[COLE AQUI O LINK DA API PUBLICADA]
+https://balsas-api.onrender.com/
