@@ -12,7 +12,7 @@ Projeto final da disciplina **Programação para Web**, do curso de **Análise e
 
 | Nome completo | Matrícula |
 |---|---|
-| Carlos Oliveira Lopes | [25.1.07350] |
+| Carlos Oliveira Lopes | 25.1.07350 |
 
 
 ## Tecnologias utilizadas
@@ -24,7 +24,7 @@ Projeto final da disciplina **Programação para Web**, do curso de **Análise e
 | Prisma ORM | 7.10.0 | Modelagem do banco, migrações e consultas |
 | @prisma/adapter-pg | 7.10.0 | Adaptador do Prisma para PostgreSQL |
 | pg | 8.23.x | Driver PostgreSQL para Node.js |
-| PostgreSQL (Neon) | [VERSÃO] | Banco de dados relacional na nuvem |
+| PostgreSQL (Neon) | Banco de dados relacional na nuvem |
 | cors | 2.8.x | Permite que outras origens consumam a API |
 | dotenv | 18.x | Carrega variáveis de ambiente do `.env` |
 | Render | – | Hospedagem da API |
